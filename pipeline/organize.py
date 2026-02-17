@@ -52,10 +52,10 @@ def show_inventory(raw_dir):
 
 
 def organize_files(files_csv, raw_dir, category="rehearsal"):
-    """Copy files listed in CSV to the appropriate raw/ category folder.
+    """Show a summary of files to organize from the CSV.
 
-    Files are copied (not moved) to preserve originals. The relative
-    directory structure from the source is maintained.
+    Checks which files from the CSV have already been copied to the
+    workspace and reports how many remain.
 
     Args:
         files_csv: Path to files_to_process.csv with filepath_anonymized column.
@@ -63,7 +63,7 @@ def organize_files(files_csv, raw_dir, category="rehearsal"):
         category: Target category subfolder (default: "rehearsal").
 
     Returns:
-        Number of files copied.
+        Total number of files listed in the CSV.
     """
     df = pd.read_csv(files_csv)
     target_dir = Path(raw_dir) / category
@@ -116,7 +116,6 @@ def copy_from_source(source_dir, raw_dir, files_csv, category="rehearsal"):
 
     for _, row in df.iterrows():
         rel_path = row["filepath_anonymized"]
-        src_file = source.parent.parent / rel_path.split("/", 2)[-1] if "/" in rel_path else source / rel_path
 
         # Reconstruct source path: LOCAL_DATA_PATH / filepath_anonymized
         # filepath_anonymized starts with "Sonica/audio/rehearsal archive/..."

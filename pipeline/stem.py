@@ -71,7 +71,7 @@ def separate_single(filepath, stems_dir, device="cuda", model="htdemucs"):
 
 
 def run_stem_separation(raw_dir, stems_dir, device="cuda", model="htdemucs",
-                        batch_size=4, num_workers=1):
+                        num_workers=1, **kwargs):
     """Run stem separation on all audio files.
 
     Processes files sequentially through Demucs (GPU is the bottleneck).
@@ -82,7 +82,6 @@ def run_stem_separation(raw_dir, stems_dir, device="cuda", model="htdemucs",
         stems_dir: Path to output stems directory.
         device: Torch device ("cuda" or "cpu").
         model: Demucs model name.
-        batch_size: Not used by CLI Demucs; kept for API compatibility.
         num_workers: Number of parallel Demucs processes (default 1 for GPU).
 
     Returns:
