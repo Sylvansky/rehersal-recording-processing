@@ -1,2 +1,4 @@
-LOCAL_DATA_PATH=/path/to/data
-DEV_PATH=/path/to/root/dev
+# Path to your data drive (e.g. where Sonica/audio/ lives)
+LOCAL_DATA_PATH=/mnt/d/Music
+# Path to your dev/projects root directory
+DEV_PATH=/home/yourusername/dev
