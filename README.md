@@ -42,11 +42,12 @@ jupyter notebook
 Run the notebooks in order:
 
 1. **`music_summary.ipynb`** — Scan and catalogue source audio files
-2. **`01_organize.ipynb`** — Organize raw recordings by type
-3. **`02_stem_separation.ipynb`** — Separate into stems with Demucs (GPU)
-4. **`03_analyze.ipynb`** — Detect tempo, key, loudness metrics
-5. **`04_curate.ipynb`** — Quality control and tagging
-6. **`05_create_dataset.ipynb`** — Create MusicGen training dataset
+2. **`01_organize.ipynb`** — Organize raw recordings and parse song/version listings from file names
+3. **`02_song_version_embeddings.ipynb`** — Compare one song's versions with MERT embeddings + clustering
+4. **`03_stem_separation.ipynb`** — Separate into stems with Demucs (GPU)
+5. **`04_analyze.ipynb`** — Detect tempo, key, loudness metrics
+6. **`05_curate.ipynb`** — Quality control and tagging
+7. **`06_create_dataset.ipynb`** — Create MusicGen training dataset
 
 See [SKILL.md](SKILL.md) for detailed pipeline documentation and
 [references/finetuning.md](references/finetuning.md) for MusicGen training instructions.

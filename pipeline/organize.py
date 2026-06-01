@@ -1,11 +1,51 @@
 """Phase 1: Organize raw recordings by quality and type."""
 
 import shutil
+import re
 from pathlib import Path
 import pandas as pd
 
 
 AUDIO_EXTENSIONS = {".wav", ".flac", ".mp3", ".m4a", ".ogg"}
+CATALOG_EXTENSIONS = {"mp3", "wav", "flac", "m4a", "ogg"}
+DATE_RE = re.compile(r"/(19\d{6}|20\d{6})(?:/|$)")
+VERSION_RE = re.compile(r"(?:^|[_\-\s])v(\d+)(?:$|[_\-\s])", re.IGNORECASE)
+PART_RE = re.compile(r"part[_\-\s]*([ivx]+|\d+)", re.IGNORECASE)
+
+
+def _extract_date(filepath_anonymized):
+    match = DATE_RE.search(str(filepath_anonymized).replace("\\", "/"))
+    return match.group(1) if match else None
+
+
+def _parse_version(filename_stem):
+    match = VERSION_RE.search(filename_stem)
+    if not match:
+        return None
+    try:
+        return int(match.group(1))
+    except ValueError:
+        return None
+
+
+def _parse_part(filename_stem):
+    match = PART_RE.search(filename_stem)
+    if not match:
+        return None
+    return match.group(1).lower()
+
+
+def _normalize_song_key(filename_stem):
+    stem = filename_stem.strip()
+    if stem.startswith("._"):
+        stem = stem[2:]
+
+    stem = re.sub(r"\([^)]*\)", "", stem)
+    stem = PART_RE.sub("", stem)
+    stem = re.sub(r"(?:^|[_\-\s])v\d+(?:$|[_\-\s])", " ", stem, flags=re.IGNORECASE)
+    stem = re.sub(r"[_\-]+", " ", stem)
+    stem = re.sub(r"\s+", " ", stem).strip().lower()
+    return stem or filename_stem.lower()
 
 
 def scan_source(source_dir):
@@ -146,3 +186,73 @@ def copy_from_source(source_dir, raw_dir, files_csv, category="rehearsal"):
     if errors:
         print(f"  ⚠️  {errors} files had errors")
     return copied
+
+
+def build_song_version_catalog(files_csv, exclude_hidden=True):
+    """Parse song names/versions from filenames for first-pass grouping.
+
+    Args:
+        files_csv: Path to files_to_process.csv.
+        exclude_hidden: If True, exclude AppleDouble files (._*).
+
+    Returns:
+        Tuple of (instances_df, summary_df).
+    """
+    df = pd.read_csv(files_csv)
+    required = {"filepath_anonymized", "file_extension", "duration_seconds", "size_bytes"}
+    missing = sorted(required - set(df.columns))
+    if missing:
+        raise ValueError(f"Missing columns in files CSV: {', '.join(missing)}")
+
+    work = df.copy()
+    work["filepath_anonymized"] = work["filepath_anonymized"].astype(str)
+    work["file_name"] = work["filepath_anonymized"].apply(lambda p: Path(p).name)
+    work["file_stem"] = work["file_name"].apply(lambda x: Path(x).stem)
+    work["file_extension"] = work["file_extension"].astype(str).str.lower()
+    work = work[work["file_extension"].isin(CATALOG_EXTENSIONS)].copy()
+
+    work["is_hidden_appledouble"] = work["file_name"].str.startswith("._")
+    if exclude_hidden:
+        work = work[~work["is_hidden_appledouble"]].copy()
+
+    work["recording_date"] = work["filepath_anonymized"].apply(_extract_date)
+    work["version_num"] = work["file_stem"].apply(_parse_version)
+    work["part"] = work["file_stem"].apply(_parse_part)
+    work["is_wip"] = work["file_stem"].str.contains("wip", case=False, na=False)
+    work["song_key"] = work["file_stem"].apply(_normalize_song_key)
+    work["recording_date"] = pd.to_datetime(work["recording_date"], format="%Y%m%d", errors="coerce")
+
+    instances = work[[
+        "song_key",
+        "file_stem",
+        "version_num",
+        "part",
+        "recording_date",
+        "duration_seconds",
+        "size_bytes",
+        "file_extension",
+        "is_wip",
+        "is_hidden_appledouble",
+        "filepath_anonymized",
+    ]].sort_values(["song_key", "recording_date", "version_num", "file_stem"]).reset_index(drop=True)
+
+    summary = (
+        instances.groupby("song_key", dropna=False)
+        .agg(
+            recordings_count=("file_stem", "count"),
+            first_recording_date=("recording_date", "min"),
+            last_recording_date=("recording_date", "max"),
+            distinct_versions=("version_num", lambda s: int(s.dropna().nunique())),
+            has_wip=("is_wip", "max"),
+            total_duration_seconds=("duration_seconds", "sum"),
+        )
+        .reset_index()
+        .sort_values(["recordings_count", "song_key"], ascending=[False, True])
+    )
+    summary["total_duration_hours"] = summary["total_duration_seconds"].fillna(0) / 3600.0
+    summary["first_recording_date"] = summary["first_recording_date"].dt.strftime("%Y-%m-%d")
+    summary["last_recording_date"] = summary["last_recording_date"].dt.strftime("%Y-%m-%d")
+
+    instances["recording_date"] = instances["recording_date"].dt.strftime("%Y-%m-%d")
+
+    return instances, summary

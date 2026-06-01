@@ -20,11 +20,12 @@ Open each notebook and run all cells in sequence:
 | Notebook | Phase | Description |
 |---|---|---|
 | `music_summary.ipynb` | Pre | Scan and catalogue source audio files |
-| `01_organize.ipynb` | 1 | Organize raw recordings by type |
-| `02_stem_separation.ipynb` | 2 | Separate into stems with Demucs (GPU) |
-| `03_analyze.ipynb` | 3 | Detect tempo, key, loudness |
-| `04_curate.ipynb` | 4 | Quality control and tagging |
-| `05_create_dataset.ipynb` | 5 | Create MusicGen training dataset |
+| `01_organize.ipynb` | 1 | Organize raw recordings + parse song/version listings |
+| `02_song_version_embeddings.ipynb` | 2 | Embed one song's versions (MERT) + cluster similarity |
+| `03_stem_separation.ipynb` | 3 | Separate into stems with Demucs (GPU) |
+| `04_analyze.ipynb` | 4 | Detect tempo, key, loudness |
+| `05_curate.ipynb` | 5 | Quality control and tagging |
+| `06_create_dataset.ipynb` | 6 | Create MusicGen training dataset |
 
 ## Pipeline Overview
 
@@ -37,29 +38,39 @@ Sort recordings by quality and type:
 - `raw/live/` — Live recordings
 - `raw/rehearsal/` — Practice sessions
 - `raw/rejected/` — Discard pile
+- Parse filename/date metadata into:
+    - `analyzed/song_instances.csv`
+    - `analyzed/song_versions_summary.csv`
 
-### Phase 2: Stem Separation (`02_stem_separation.ipynb`)
+### Phase 2: Song Version Similarity (`02_song_version_embeddings.ipynb`)
+For a selected `song_key`:
+- Build/Load grouped versions from filename parsing
+- Compute audio embeddings with MERT (`m-a-p/MERT-v1-95M`)
+- Run clustering (cosine distance, agglomerative)
+- Flag likely bad recordings by outlier score + short duration
+
+### Phase 3: Stem Separation (`03_stem_separation.ipynb`)
 Use Demucs to split songs into:
 - `stems/{model}/{song}/vocals.wav`
 - `stems/{model}/{song}/drums.wav`
 - `stems/{model}/{song}/bass.wav`
 - `stems/{model}/{song}/other.wav` (guitar, keys, etc.)
 
-### Phase 3: Analysis (`03_analyze.ipynb`)
+### Phase 4: Analysis (`04_analyze.ipynb`)
 Auto-detect for each stem (parallelized across CPU cores):
 - Tempo (BPM)
 - Musical key
 - Duration
 - Audio quality metrics (peak dB, RMS dB)
 
-### Phase 4: Curation (`04_curate.ipynb`)
+### Phase 5: Curation (`05_curate.ipynb`)
 Interactive quality control:
 - Flag stems with artifacts
 - Tag genre, mood, era
 - Select best material
 - Create train/validation split
 
-### Phase 5: Dataset (`05_create_dataset.ipynb`)
+### Phase 6: Dataset (`06_create_dataset.ipynb`)
 Generate MusicGen-compatible dataset:
 - 30-second clips at 32 kHz
 - Text captions with metadata
@@ -77,16 +88,17 @@ rehersal-recording-processing/
 │   ├── __init__.py
 │   ├── config.py               # Configuration & env loading
 │   ├── organize.py             # Phase 1: file organization
-│   ├── stem.py                 # Phase 2: Demucs stem separation
-│   ├── analyze.py              # Phase 3: audio analysis
-│   ├── curate.py               # Phase 4: curation template
-│   └── dataset.py              # Phase 5: dataset generation
+│   ├── stem.py                 # Phase 3: Demucs stem separation
+│   ├── analyze.py              # Phase 4: audio analysis
+│   ├── curate.py               # Phase 5: curation template
+│   └── dataset.py              # Phase 6: dataset generation
 ├── music_summary.ipynb         # Pre: catalogue source files
 ├── 01_organize.ipynb           # Phase 1 notebook
-├── 02_stem_separation.ipynb    # Phase 2 notebook
-├── 03_analyze.ipynb            # Phase 3 notebook
-├── 04_curate.ipynb             # Phase 4 notebook
-├── 05_create_dataset.ipynb     # Phase 5 notebook
+├── 02_song_version_embeddings.ipynb  # Phase 2 notebook
+├── 03_stem_separation.ipynb    # Phase 3 notebook
+├── 04_analyze.ipynb            # Phase 4 notebook
+├── 05_curate.ipynb             # Phase 5 notebook
+├── 06_create_dataset.ipynb     # Phase 6 notebook
 ├── scripts/                    # Legacy bash scripts (reference)
 ├── references/
 │   └── finetuning.md           # MusicGen fine-tuning guide

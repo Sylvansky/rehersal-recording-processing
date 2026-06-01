@@ -1,17 +1,56 @@
 """Phase 2: Stem separation using Demucs with GPU acceleration."""
 
+import os
 import subprocess
 import shutil
+import tempfile
 from pathlib import Path
-from concurrent.futures import ThreadPoolExecutor
 from tqdm import tqdm
 
 
 AUDIO_EXTENSIONS = {".wav", ".flac", ".mp3", ".m4a", ".ogg"}
 
 
+def _resolve_demucs_runner():
+    """Resolve the preferred Demucs CLI invocation.
+
+    Returns:
+        Command prefix list for subprocess.run.
+    """
+    demucs_bin = shutil.which("demucs")
+    if demucs_bin:
+        return [demucs_bin]
+    return ["python", "-m", "demucs"]
+
+
+def _is_cuda_available():
+    """Check CUDA availability through torch when installed."""
+    try:
+        import torch
+        return bool(torch.cuda.is_available())
+    except Exception:
+        return False
+
+
+def _track_id(filepath, raw_root):
+    """Build a unique, stable output folder name for a track.
+
+    Uses the relative path under raw/ to avoid basename collisions.
+    Example: raw/live/set1/song.wav -> live__set1__song
+    """
+    try:
+        rel = filepath.relative_to(raw_root)
+        rel_no_ext = rel.with_suffix("")
+        parts = rel_no_ext.parts
+    except Exception:
+        parts = (filepath.stem,)
+    return "__".join(parts)
+
+
 def find_audio_files(raw_dir):
     """Find all audio files in the raw/ directory tree.
+
+    Ignores files under the `rejected` category.
 
     Args:
         raw_dir: Path to the raw/ workspace directory.
@@ -22,12 +61,15 @@ def find_audio_files(raw_dir):
     raw = Path(raw_dir)
     files = [
         p for p in raw.rglob("*")
-        if p.is_file() and p.suffix.lower() in AUDIO_EXTENSIONS
+        if p.is_file()
+        and p.suffix.lower() in AUDIO_EXTENSIONS
+        and "rejected" not in {part.lower() for part in p.relative_to(raw).parts}
     ]
     return sorted(files)
 
 
-def separate_single(filepath, stems_dir, device="cuda", model="htdemucs"):
+def separate_single(filepath, raw_dir, stems_dir, device="cuda", model="htdemucs",
+                   demucs_runner=None):
     """Run Demucs stem separation on a single audio file.
 
     Args:
@@ -40,33 +82,53 @@ def separate_single(filepath, stems_dir, device="cuda", model="htdemucs"):
         True if successful, False otherwise.
     """
     filepath = Path(filepath)
-    basename = filepath.stem
-    output_check = Path(stems_dir) / model / basename
+    raw_root = Path(raw_dir)
+    track_name = _track_id(filepath, raw_root)
+    output_check = Path(stems_dir) / model / track_name
+    stem_exts = {".wav", ".mp3", ".flac"}
 
     # Skip if already processed
-    if output_check.exists() and any(output_check.iterdir()):
+    if output_check.exists() and any(
+        p.is_file() and p.suffix.lower() in stem_exts for p in output_check.iterdir()
+    ):
         return True
 
+    demucs_runner = demucs_runner or _resolve_demucs_runner()
+
     try:
-        cmd = [
-            "python", "-m", "demucs",
-            "--device", device,
-            "-n", model,
-            "-o", str(stems_dir),
-            str(filepath),
-        ]
-        result = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=600
-        )
+        with tempfile.TemporaryDirectory(prefix="demucs_") as tmpdir:
+            demucs_input = filepath
+
+            # Demucs names output folder by input filename stem.
+            # Stage a unique name when needed to prevent collisions.
+            if track_name != filepath.stem:
+                staged = Path(tmpdir) / f"{track_name}{filepath.suffix.lower()}"
+                try:
+                    os.symlink(filepath, staged)
+                except OSError:
+                    shutil.copy2(filepath, staged)
+                demucs_input = staged
+
+            cmd = [
+                *demucs_runner,
+                "--device", device,
+                "-n", model,
+                "-o", str(stems_dir),
+                str(demucs_input),
+            ]
+            result = subprocess.run(
+                cmd, capture_output=True, text=True, timeout=1800
+            )
         if result.returncode != 0:
-            print(f"  ❌ Failed: {basename} - {result.stderr[:200]}")
+            err = (result.stderr or result.stdout or "").strip()
+            print(f"  ❌ Failed: {track_name} - {err[:200]}")
             return False
         return True
     except subprocess.TimeoutExpired:
-        print(f"  ⏱️  Timeout: {basename}")
+        print(f"  ⏱️  Timeout: {track_name}")
         return False
     except Exception as e:
-        print(f"  ❌ Error: {basename} - {e}")
+        print(f"  ❌ Error: {track_name} - {e}")
         return False
 
 
@@ -92,20 +154,35 @@ def run_stem_separation(raw_dir, stems_dir, device="cuda", model="htdemucs",
         print("❌ No audio files found in raw/")
         return 0, 0
 
+    if device == "cuda" and not _is_cuda_available():
+        print("⚠️ CUDA requested but unavailable; falling back to CPU")
+        device = "cpu"
+
+    demucs_runner = _resolve_demucs_runner()
+
     stems_path = Path(stems_dir)
     stems_path.mkdir(parents=True, exist_ok=True)
 
     print(f"🎵 Stem Separation (Demucs - {model})")
     print(f"   Device: {device}")
+    print(f"   Runner: {' '.join(demucs_runner)}")
     print(f"   Files: {len(files)}")
     print(f"   Output: {stems_path}")
     print()
 
     success = 0
     failed = 0
+    raw_root = Path(raw_dir)
 
     for filepath in tqdm(files, desc="Separating stems"):
-        if separate_single(filepath, stems_dir, device=device, model=model):
+        if separate_single(
+            filepath,
+            raw_root,
+            stems_dir,
+            device=device,
+            model=model,
+            demucs_runner=demucs_runner,
+        ):
             success += 1
         else:
             failed += 1

@@ -8,3 +8,6 @@ tqdm
 numpy
 jupyter
 ipykernel
+scikit-learn
+transformers
+torchaudio
