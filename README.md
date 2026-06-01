@@ -49,5 +49,18 @@ Run the notebooks in order:
 6. **`05_curate.ipynb`** — Quality control and tagging
 7. **`06_create_dataset.ipynb`** — Create MusicGen training dataset
 
+### Song Key Parsing Notes
+
+The song version catalog generated in Phase 1 (`analyzed/song_instances.csv`,
+`analyzed/song_versions_summary.csv`) applies these normalization rules:
+
+- Remove date tokens from filenames (for example `20200314`) and keep date as metadata.
+- Strip common version/edit markers (`v3`, `edit`, `demo`, `mastered`, `no vox`, etc.) for grouping.
+- Merge close title variants using edit-distance style fuzzy matching.
+- Prefer the shortest base label as the canonical `song_key` for each merged group.
+
+Example variants such as `charmed`, `charmed life`, `charmed edit`, and
+`charned no vox` are grouped under one canonical key.
+
 See [SKILL.md](SKILL.md) for detailed pipeline documentation and
 [references/finetuning.md](references/finetuning.md) for MusicGen training instructions.

@@ -11,6 +11,11 @@ CATALOG_EXTENSIONS = {"mp3", "wav", "flac", "m4a", "ogg"}
 DATE_RE = re.compile(r"/(19\d{6}|20\d{6})(?:/|$)")
 VERSION_RE = re.compile(r"(?:^|[_\-\s])v(\d+)(?:$|[_\-\s])", re.IGNORECASE)
 PART_RE = re.compile(r"part[_\-\s]*([ivx]+|\d+)", re.IGNORECASE)
+INLINE_DATE_RE = re.compile(r"(?:^|[_\-\s])(19\d{6,7}|20\d{6,7})(?:$|[_\-\s])")
+SIMPLIFY_TOKEN_RE = re.compile(
+    r"\b(edit|demo|mastered|mix|rmx|remix|version|ver|no\s*vox|novox|vox|vocal|vocals|instrum(?:ental)?)\b",
+    re.IGNORECASE,
+)
 
 
 def _extract_date(filepath_anonymized):
@@ -41,11 +46,121 @@ def _normalize_song_key(filename_stem):
         stem = stem[2:]
 
     stem = re.sub(r"\([^)]*\)", "", stem)
+    stem = INLINE_DATE_RE.sub(" ", stem)
     stem = PART_RE.sub("", stem)
     stem = re.sub(r"(?:^|[_\-\s])v\d+(?:$|[_\-\s])", " ", stem, flags=re.IGNORECASE)
     stem = re.sub(r"[_\-]+", " ", stem)
     stem = re.sub(r"\s+", " ", stem).strip().lower()
     return stem or filename_stem.lower()
+
+
+def _levenshtein_distance(a, b):
+    if a == b:
+        return 0
+    if not a:
+        return len(b)
+    if not b:
+        return len(a)
+
+    prev = list(range(len(b) + 1))
+    for i, ca in enumerate(a, start=1):
+        curr = [i]
+        for j, cb in enumerate(b, start=1):
+            insert_cost = curr[j - 1] + 1
+            delete_cost = prev[j] + 1
+            replace_cost = prev[j - 1] + (0 if ca == cb else 1)
+            curr.append(min(insert_cost, delete_cost, replace_cost))
+        prev = curr
+    return prev[-1]
+
+
+def _simplify_for_similarity(song_key):
+    text = str(song_key).lower()
+    text = INLINE_DATE_RE.sub(" ", text)
+    text = SIMPLIFY_TOKEN_RE.sub(" ", text)
+    text = re.sub(r"[^a-z0-9\s]", " ", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    return text
+
+
+def _song_number_key(song_key):
+    match = re.fullmatch(r"song\s*0*(\d+)", str(song_key).strip().lower())
+    if not match:
+        return None
+    return int(match.group(1))
+
+
+def _is_similar_song_title(a, b):
+    if not a or not b:
+        return False
+    if a == b:
+        return True
+
+    a_num = _song_number_key(a)
+    b_num = _song_number_key(b)
+    if a_num is not None and b_num is not None:
+        return a_num == b_num
+
+    if a.startswith(b) or b.startswith(a):
+        if min(len(a), len(b)) >= 4:
+            return True
+
+    dist = _levenshtein_distance(a, b)
+    norm = dist / max(len(a), len(b), 1)
+    if norm <= 0.18:
+        return True
+
+    a_tokens = set(a.split())
+    b_tokens = set(b.split())
+    if not a_tokens or not b_tokens:
+        return False
+    overlap = len(a_tokens & b_tokens) / max(len(a_tokens), len(b_tokens))
+    return norm <= 0.34 and overlap >= 0.5
+
+
+def _merge_similar_song_keys(keys_series):
+    """Merge close song keys using edit-distance similarity.
+
+    Returns a dict mapping original song_key -> merged song_key.
+    """
+    counts = keys_series.value_counts(dropna=False)
+    unique_keys = [k for k in counts.index.tolist() if isinstance(k, str) and k.strip()]
+
+    representatives = []
+    rep_groups = {}
+    mapping = {}
+
+    for key in unique_keys:
+        simplified = _simplify_for_similarity(key)
+        matched_rep = None
+        for rep_key, rep_simplified in representatives:
+            if _is_similar_song_title(simplified, rep_simplified):
+                matched_rep = rep_key
+                break
+
+        if matched_rep is None:
+            representatives.append((key, simplified))
+            mapping[key] = key
+            rep_groups[key] = [key]
+        else:
+            mapping[key] = matched_rep
+            rep_groups.setdefault(matched_rep, []).append(key)
+
+    # Prefer the shortest normalized base label as canonical name per group.
+    final_mapping = {}
+    for rep_key, group_keys in rep_groups.items():
+        _ = rep_key
+
+        def canonical_rank(k):
+            simplified = _simplify_for_similarity(k)
+            base = simplified or str(k).strip().lower()
+            return (len(base), len(str(k)), str(k))
+
+        canonical = min(group_keys, key=canonical_rank)
+        for k in group_keys:
+            final_mapping[k] = canonical
+
+    return final_mapping
 
 
 def scan_source(source_dir):
@@ -220,6 +335,8 @@ def build_song_version_catalog(files_csv, exclude_hidden=True):
     work["part"] = work["file_stem"].apply(_parse_part)
     work["is_wip"] = work["file_stem"].str.contains("wip", case=False, na=False)
     work["song_key"] = work["file_stem"].apply(_normalize_song_key)
+    key_mapping = _merge_similar_song_keys(work["song_key"])
+    work["song_key"] = work["song_key"].map(lambda k: key_mapping.get(k, k))
     work["recording_date"] = pd.to_datetime(work["recording_date"], format="%Y%m%d", errors="coerce")
 
     instances = work[[

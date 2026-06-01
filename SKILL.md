@@ -41,6 +41,11 @@ Sort recordings by quality and type:
 - Parse filename/date metadata into:
     - `analyzed/song_instances.csv`
     - `analyzed/song_versions_summary.csv`
+- Song key normalization rules:
+    - Remove inline date fragments from filename titles and keep date in metadata
+    - Strip common version/edit markers for grouping
+    - Merge near-duplicate titles with edit-distance style fuzzy matching
+    - Use shortest base label as canonical `song_key` for each merged group
 
 ### Phase 2: Song Version Similarity (`02_song_version_embeddings.ipynb`)
 For a selected `song_key`:
