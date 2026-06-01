@@ -11,3 +11,7 @@ ipykernel
 scikit-learn
 transformers
 torchaudio
+torchcodec
+nnaudio
+imageio-ffmpeg
+matplotlib
